@@ -1,9 +1,7 @@
-from asyncio import subprocess
 import json
 from flask import Flask, request
-import datetime
 from requests import get as http_get
-
+from utils.common import get_current_time
 
 class Coordinator:
 
@@ -13,6 +11,7 @@ class Coordinator:
         self.id = 0
         self.workers = {}
         self.cur_task = "IDLE"
+        self.num_partitions = 3
 
     def add_worker(self, port):
         """
@@ -33,17 +32,14 @@ class Coordinator:
             try:
                 res = http_get(f"127.0.0.1:{port}/")
                 if not (res and res.ok and res.text == "Alive"):
-                    print(f"{self.get_current_time()} Worker")
+                    print(f"{get_current_time()} Worker")
             except:
                 # if not responding then remove worker 
                 self.workers.pop(port)
 
-    def get_current_time():
-        return datetime.datetime.now()
-
     def partition_input_file(self, file):
         """
-        Split the input text file into num_worker splits. Each split corresponds to a partition
+        Split the input text file into num_partitions splits. Each split corresponds to a partition
         Store splits in tmp/task_name/<partition#>
         Returns a the partition directory
         """
@@ -69,13 +65,23 @@ class Coordinator:
         based on hash/range. Then execute callback (indicate to workers to start reduce phase)
         """
         pass
+    
+    def shuffle(self, filepath):
+        """
+        read the intermediate map output, hash it and split then write to the new partitions
+        """
+        pass
 
-    def start_task(self):
+    def end_task(self):
+        print(f"{get_current_time()} Finished Task {self.cur_task}")
+        self.cur_task = "IDLE"
+
+    async def start_task(self):
         """
         Wrapper around await_map_results, await_reduce_results and await_task to make it easier to run them asynchronously.
         """
         self.start_map()
-        self.await_map_results()
+        self.await_map_results(self.shuffle)
         self.await_reduce_results()
         self.end_task()
     
@@ -84,7 +90,7 @@ class Coordinator:
         # ====================ROUTES==================
         @self.app.route("/", methods=["GET"])
         def probe():
-            return f"[{state.get_current_time()}] Alive\n"
+            return f"[{get_current_time()}] Alive\n"
 
         @self.app.route("/register/<port>")
         def register_worker(port):
@@ -92,7 +98,7 @@ class Coordinator:
             Registers worker and returns a unique id to it.
             Worker will be identified using this unique id in all future communications
             """
-            id = state.add_worker(id, port)
+            id = self.add_worker(id, port)
             if id != -1:
                 return f"{id}"
 
@@ -114,21 +120,6 @@ class Coordinator:
 
             return "task scheduled successfully"
 
-        @self.app.route("/report/<phase>/<worker>/<status>")
-        def report_map_status(phase, worker, status):
-            """
-            end point for worker to report status of task to coordinator
-            @params:
-                phase
-                    value must be one of map or reduce
-                worker
-                    the unique assigned to the worker by the coordinator
-                status
-                    value must be one of 0 or 1
-                    0: task succeeded
-                    1: task failed
-            """
-            pass
         
         """
         Start the server on localhost:PORT
