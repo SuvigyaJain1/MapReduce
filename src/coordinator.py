@@ -1,7 +1,10 @@
+from hashlib import sha1, sha256
 import json
 from flask import Flask, request
-from requests import get as http_get
+from requests import get as http_get, post as http_post
 from utils.common import get_current_time
+import os
+import subprocess
 
 class Coordinator:
 
@@ -49,14 +52,18 @@ class Coordinator:
         """
         Use any round-robin/ hash style partitioning to assign each partition to any 1 worker
         """
-        pass
+        for partition in range(self.num_partitions):
+            worker_addr = self.workers[partition%len(self.workers)]
+            http_get(f"localhost:{worker_addr}/assign-partition/{partition}")
+        
     
     def start_map(self):
         """
         Sends commands to workers to start the map tasks on their respective partitions. 
-        1 worker may get more than 1 command (1 per partition assigned to it)
         """
-        pass
+        for worker in self.workers:
+            http_get(f"localhost:{worker}/map")
+        
 
     def await_map_results(self, callback):
         """
@@ -70,7 +77,15 @@ class Coordinator:
         """
         read the intermediate map output, hash it and split then write to the new partitions
         """
-        pass
+        filename = os.path.basename(filepath)
+        with open(filepath, 'r') as fd:
+            for line in fd.readlines():
+                key, *val = line.split()
+                target_partition = sha1(key)%self.num_partitions
+                target_file = os.path.join(f"filesystem/{self.cur_task}/{target_partition}/redinput-{filename}")
+                if not os.path.exists(target_file):
+                    open(target_file, "w").close() #create file
+                os.system(f"echo {key, val} >> {target_file}") # append to the file
 
     def end_task(self):
         print(f"{get_current_time()} Finished Task {self.cur_task}")
@@ -101,6 +116,7 @@ class Coordinator:
             id = self.add_worker(id, port)
             if id != -1:
                 return f"{id}"
+            return -1
 
         @self.app.route("/schedule", methods=["POST"]):
         def shched_mapred_task():
@@ -130,5 +146,5 @@ class Coordinator:
 
 if __name__ == "__main__":
     PORT=5000
-    coordinator = Coordinator()
-    coordinator.start_server(__name__, PORT)
+    coordinator = Coordinator(__name__, PORT)
+    coordinator.start_server()
