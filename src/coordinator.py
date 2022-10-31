@@ -46,7 +46,19 @@ class Coordinator:
         Store splits in tmp/task_name/<partition#>
         Returns a the partition directory
         """
-        pass
+        self.task_file = file
+        with open(file, 'r') as f:
+            input_data = f.read().split()
+            partitions = [ partition.tolist() for partition in np.array_split(input_data, self.num_partitions) ]
+            for i in range(self.num_partitions):
+                partition_directory = f"./filesystem/{self.cur_task}/{i}"
+                os.makedirs(partition_directory)
+
+                output_path = f"{partition_directory}/input-{file}"
+                partition_file = open(output_path, 'w')
+
+                partition_data = ' '.join(partitions[i])
+                partition_file.write(partition_data)
     
     def assign_partitions_to_workers(self, partitions_dir):
         """
@@ -66,12 +78,12 @@ class Coordinator:
         
 
     def await_map_results(self, callback):
-        """
-        start a process that checks every x seconds if a map process has ended. 
-        when all maps end, collect intermediate outputs and shuffle them to correct partitions
-        based on hash/range. Then execute callback (indicate to workers to start reduce phase)
-        """
-        pass
+        task_directory = f"./filesystem/{self.cur_task}"
+        for i in range(self.num_partitions):
+            intermediate_file_name = f"{task_directory}/{i}/int-{self.task_file}" 
+            while not isfile(intermediate_file_name):
+                continue
+            callback(intermediate_file_name)
     
     def shuffle(self, filepath):
         """
