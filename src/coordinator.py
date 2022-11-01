@@ -5,6 +5,7 @@ from requests import get as http_get, post as http_post
 from utils.common import get_current_time
 import os
 import subprocess
+import time
 
 class Coordinator:
 
@@ -81,10 +82,20 @@ class Coordinator:
         task_directory = f"./filesystem/{self.cur_task}"
         for i in range(self.num_partitions):
             intermediate_file_name = f"{task_directory}/{i}/int-{self.task_file}" 
-            while not isfile(intermediate_file_name):
+            while not os.path.exists(intermediate_file_name):
+                time.sleep(0.1)
                 continue
             callback(intermediate_file_name)
-    
+ 
+    def await_reduce_results(self, callback):
+        task_directory = f"./filesystem/{self.cur_task}"
+        for i in range(self.num_partitions):
+            output_file_name = f"{task_directory}/{i}/out-{self.task_file}" 
+            while not os.path.exists(output_file_name):
+                time.sleep(0.1)
+                continue
+            callback(output_file_name)
+
     def shuffle(self, filepath):
         """
         read the intermediate map output, hash it and split then write to the new partitions
@@ -98,10 +109,19 @@ class Coordinator:
                 if not os.path.exists(target_file):
                     open(target_file, "w").close() #create file
                 os.system(f"echo {key, val} >> {target_file}") # append to the file
-
+    
+    def collect(self, output_file):
+        with open(output_file, "r") as fd:
+            output = output_file.read()
+        
+        with open(f"filesystem/{self.cur_task}/out.txt", "a") as fd:
+            print(output, file=fd)
+        
+    
     def end_task(self):
         print(f"{get_current_time()} Finished Task {self.cur_task}")
         self.cur_task = "IDLE"
+
 
     async def start_task(self):
         """
@@ -109,7 +129,7 @@ class Coordinator:
         """
         self.start_map()
         self.await_map_results(self.shuffle)
-        self.await_reduce_results()
+        self.await_reduce_results(self.collect)
         self.end_task()
     
     def start_server(self):
