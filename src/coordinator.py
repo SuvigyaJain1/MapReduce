@@ -43,6 +43,7 @@ class Coordinator:
             try:
                 res = http_get(f"http://127.0.0.1:{port}/")
                 if not (res and res.ok and res.text == "Alive"):
+                    self.workers.pop(port)
                     print(f"{get_current_time()} Worker {port} has died. Removing from list of workers")
             except:
                 # if not responding then remove worker 
@@ -54,7 +55,7 @@ class Coordinator:
         """
         Split the input text file into num_partitions splits. Each split corresponds to a partition
         Store splits in tmp/task_name/<partition#>
-        Returns a the partition directory
+        Returns the partition directory
         """
         self.task_file = file
         with open(file, 'r') as f:
@@ -194,6 +195,7 @@ class Coordinator:
             self.mapper = data["mapper_file"]
             self.reducer = data["reducer_file"]
             self.cur_task = data["task_name"]
+            task=data["task_name"]
 
             if os.path.exists(f"filesystem/{self.cur_task}"):
                 print(f"{get_current_time()} Task name already exists choose a different name")
@@ -204,7 +206,7 @@ class Coordinator:
             self.assign_partitions_to_workers()
             self.start_task()
 
-            return "task scheduled successfully"
+            return "Find the final output in filesystem/"+task+"/out.txt"
 
         
         """
