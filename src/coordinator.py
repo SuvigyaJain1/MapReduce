@@ -7,7 +7,7 @@ import os
 import subprocess
 import time
 import numpy as np
-
+import sys
 
 class Coordinator:
 
@@ -18,6 +18,7 @@ class Coordinator:
         self.workers = {}
         self.cur_task = "IDLE"
         self.num_partitions = 3
+
 
     def add_worker(self, port):
         """
@@ -34,14 +35,16 @@ class Coordinator:
         """
         Send probe requests to each worker and update list of registered workers based on the response
         """
-        for port, id in self.workers:
+        for port in self.workers:
             try:
-                res = http_get(f"127.0.0.1:{port}/")
+                res = http_get(f"http://127.0.0.1:{port}/")
                 if not (res and res.ok and res.text == "Alive"):
-                    print(f"{get_current_time()} Worker")
+                    print(f"{get_current_time()} Worker {port} has died. Removing from list of workers")
             except:
                 # if not responding then remove worker 
                 self.workers.pop(port)
+                print(f"{get_current_time()} Worker {port} has died. Removing from list of workers")
+
 
     def partition_input_file(self, file):
         """
@@ -54,7 +57,7 @@ class Coordinator:
             input_data = f.read().split()
             partitions = [ partition.tolist() for partition in np.array_split(input_data, self.num_partitions) ]
             for i in range(self.num_partitions):
-                partition_directory = f"./filesystem/{self.cur_task}/{i}"
+                partition_directory = f"./filesystem/{self.cur_task}/partition{i}"
                 os.makedirs(partition_directory)
 
                 output_path = f"{partition_directory}/input-{file}"
@@ -63,13 +66,15 @@ class Coordinator:
                 partition_data = ' '.join(partitions[i])
                 partition_file.write(partition_data)
     
-    def assign_partitions_to_workers(self, partitions_dir):
+    def assign_partitions_to_workers(self):
         """
         Use any round-robin/ hash style partitioning to assign each partition to any 1 worker
         """
+        workers = list(self.workers.keys())
         for partition in range(self.num_partitions):
-            worker_addr = self.workers[partition%len(self.workers)]
-            http_get(f"localhost:{worker_addr}/assign-partition/{partition}")
+            worker_addr = workers[partition%len(self.workers)]
+            http_get(f"http://localhost:{worker_addr}/assign-task/{self.cur_task}")
+            http_get(f"http://localhost:{worker_addr}/assign-partition/partition{partition}")
         
     
     def start_map(self):
@@ -77,8 +82,20 @@ class Coordinator:
         Sends commands to workers to start the map tasks on their respective partitions. 
         """
         for worker in self.workers:
-            http_get(f"localhost:{worker}/map")
-        
+            body = {
+                "mapper_path": self.mapper,
+            }
+            http_post(f"http://localhost:{worker}/map", json=body)
+    
+    def start_reduce(self):
+        """
+        Sends commands to workers to start the reduce tasks on their respective partitions. 
+        """
+        for worker in self.workers:
+            body = {
+                "reducer_path": self.reducer,
+            }
+            http_post(f"http://localhost:{worker}/reduce", json=body)
 
     def await_map_results(self, callback):
         task_directory = f"./filesystem/{self.cur_task}"
@@ -131,6 +148,7 @@ class Coordinator:
         """
         self.start_map()
         self.await_map_results(self.shuffle)
+        self.start_reduce()
         self.await_reduce_results(self.collect)
         self.end_task()
     
@@ -147,10 +165,10 @@ class Coordinator:
             Registers worker and returns a unique id to it.
             Worker will be identified using this unique id in all future communications
             """
-            id = self.add_worker(id, port)
+            id = self.add_worker(port)
             if id != -1:
                 return f"{id}"
-            return -1
+            return "-1"
 
         @self.app.route("/schedule", methods=["POST"])
         def shched_mapred_task():
@@ -161,11 +179,16 @@ class Coordinator:
 
             assert "input_file" in data
             assert "task_name" in data
+            assert "mapper_file" in data
+            assert "reducer_file" in data
 
+            self.mapper = data["mapper_file"]
+            self.reducer = data["reducer_file"]
             self.cur_task = data["task_name"]
+
             self.probe_workers()
             partitions_dir = self.partition_input_file(data["input_file"])
-            self.assign_partitions_to_workers(partitions_dir)
+            self.assign_partitions_to_workers()
             self.start_task()
 
             return "task scheduled successfully"
@@ -180,5 +203,6 @@ class Coordinator:
 
 if __name__ == "__main__":
     PORT=5000
+
     coordinator = Coordinator(__name__, PORT)
     coordinator.start_server()
