@@ -17,10 +17,8 @@ body = {
     "reducer_file":reducer,
     "input_file":inp
 }
-print(body)
 response = requests.post("http://127.0.0.1:5000/schedule", json=body)
 if(response.status_code==200):
-    print("Task was succesfully completed!")
     print(response.text, sep="\n")
 else:
     print("Task failed to complete")

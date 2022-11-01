@@ -22,6 +22,7 @@ class Coordinator:
         self.workers = {}
         self.cur_task = "IDLE"
         self.num_partitions = 3
+        self.logs = "logs"
 
 
     def add_worker(self, port):
@@ -39,16 +40,22 @@ class Coordinator:
         """
         Send probe requests to each worker and update list of registered workers based on the response
         """
-        for port in self.workers:
+        for port in self.workers.copy():
             try:
                 res = http_get(f"http://127.0.0.1:{port}/")
                 if not (res and res.ok and res.text == "Alive"):
                     self.workers.pop(port)
                     print(f"{get_current_time()} Worker {port} has died. Removing from list of workers")
+                    with open(f"{self.logs}/logs.txt",'a') as f:
+                        print(f"{get_current_time()} Worker {port} has died. Removing from list of workers",file=f)
+
+
             except:
                 # if not responding then remove worker 
                 self.workers.pop(port)
                 print(f"{get_current_time()} Worker {port} has died. Removing from list of workers")
+                with open(f"{self.logs}/logs.txt",'a') as f:
+                    print(f"{get_current_time()} Worker {port} has died. Removing from list of workers",file=f)
 
 
     def partition_input_file(self, file):
@@ -91,6 +98,8 @@ class Coordinator:
                 "mapper_path": self.mapper,
             }
             http_post(f"http://localhost:{worker}/map", json=body)
+        with open(f"{self.logs}/logs.txt",'a') as f:
+            print(f"{get_current_time()} {self.cur_task} : Map task started ",file=f)
     
     def start_reduce(self):
         """
@@ -101,6 +110,8 @@ class Coordinator:
                 "reducer_path": self.reducer,
             }
             http_post(f"http://localhost:{worker}/reduce", json=body)
+        with open(f"{self.logs}/logs.txt",'a') as f:
+            print(f"{get_current_time()} {self.cur_task} : Reduce task started ",file=f)
 
     def await_map_results(self, callback):
         task_directory = f"./filesystem/{self.cur_task}"
@@ -148,6 +159,8 @@ class Coordinator:
     
     def end_task(self):
         print(f"{get_current_time()} Finished Task {self.cur_task}")
+        with open(f"{self.logs}/logs.txt",'a') as f:
+            print(f"{get_current_time()} {self.cur_task} : Finished Task ",file=f)
         self.cur_task = "IDLE"
 
 
@@ -158,11 +171,18 @@ class Coordinator:
         """
         self.start_map()
         self.await_map_results(self.shuffle)
+        with open(f"{self.logs}/logs.txt",'a') as f:
+            print(f"{get_current_time()} {self.cur_task} : Finished Map and Shuffle ",file=f)
         self.start_reduce()
         self.await_reduce_results(self.collect)
+        with open(f"{self.logs}/logs.txt",'a') as f:
+            print(f"{get_current_time()} {self.cur_task} : Finished Reduce and Collect ",file=f)
         self.end_task()
     
     def start_server(self):
+
+        if not os.path.exists(self.logs):
+                os.makedirs(f"./{self.logs}")
 
         # ====================ROUTES==================
         @self.app.route("/", methods=["GET"])
@@ -197,16 +217,22 @@ class Coordinator:
             self.cur_task = data["task_name"]
             task=data["task_name"]
 
+
             if os.path.exists(f"filesystem/{self.cur_task}"):
                 print(f"{get_current_time()} Task name already exists choose a different name")
-                return "ERR"
+                with open(f"{self.logs}/logs.txt",'a') as f:
+                    print(f"{get_current_time()} Task failed as task name already exists",file=f)
+                return "Task name already exists, try again with different name"
+
+            with open(f"{self.logs}/logs.txt",'a') as f:
+                    print(f"{get_current_time()} New Task {self.cur_task} has been assigned",file=f)
 
             self.probe_workers()
             partitions_dir = self.partition_input_file(data["input_file"])
             self.assign_partitions_to_workers()
             self.start_task()
 
-            return "Find the final output in filesystem/"+task+"/out.txt"
+            return "Task successfully completed. Find the final output in filesystem/"+task+"/out.txt"
 
         
         """
