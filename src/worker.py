@@ -23,10 +23,10 @@ class Worker:
         def probe():
             return "Alive"
         
-        @self.app.route("/map")
+        @self.app.route("/map", methods=["POST"])
         def start_map():
-            if not self.partition or not self.task_name:
-                return
+            if not len(self.partitions) or not self.task_name:
+                return "ERR"
             
             body = request.get_json()
             assert "mapper_path" in body
@@ -38,10 +38,11 @@ class Worker:
                 output_file = input_file.replace("input-", "int-", 1)
                 os.system(f"python3 {mapper} {input_file} {output_file}")
 
-        @self.app.route("/reduce")
+            return "OK"
+        @self.app.route("/reduce", methods=["POST"])
         def start_red():
-            if not self.partition or not self.task_name:
-                return 
+            if not len(self.partitions) or not self.task_name:
+                return "ERR"
             
             body = request.get_json()
             assert "reducer_path" in body
@@ -52,10 +53,12 @@ class Worker:
                 input_file = os.path.join("filesystem", str(self.task_name), str(partition), file)
                 output_file = input_file.replace("redinput-", "out-", 1)
                 os.system(f"python3 {reducer} {input_file} {output_file}")
+            return "OK"
 
         @self.app.route("/assign-partition/<partition_id>")
         def register(partition_id):
             self.partitions.append(partition_id)
+            return "OK"
 
         @self.app.route("/assign-task/<task_name>")
         def assign_task(task_name):
@@ -63,6 +66,7 @@ class Worker:
                 self.partitions = []
                 self.task_name = task_name
 
+            return "OK"
         self.app.run("127.0.0.1", self.port)
 
 if __name__ == "__main__":

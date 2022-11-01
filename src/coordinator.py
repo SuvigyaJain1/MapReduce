@@ -1,13 +1,17 @@
-from hashlib import sha1, sha256
 import json
-from flask import Flask, request
-from requests import get as http_get, post as http_post
-from utils.common import get_current_time
 import os
 import subprocess
-import time
-import numpy as np
 import sys
+import time
+from hashlib import sha1, sha256
+
+import numpy as np
+from flask import Flask, request
+from requests import get as http_get
+from requests import post as http_post
+
+from utils.common import get_current_time
+
 
 class Coordinator:
 
@@ -100,18 +104,18 @@ class Coordinator:
     def await_map_results(self, callback):
         task_directory = f"./filesystem/{self.cur_task}"
         for i in range(self.num_partitions):
-            intermediate_file_name = f"{task_directory}/{i}/int-{self.task_file}" 
+            intermediate_file_name = f"{task_directory}/partition{i}/int-{self.task_file}" 
             while not os.path.exists(intermediate_file_name):
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
             callback(intermediate_file_name)
  
     def await_reduce_results(self, callback):
         task_directory = f"./filesystem/{self.cur_task}"
         for i in range(self.num_partitions):
-            output_file_name = f"{task_directory}/{i}/out-{self.task_file}" 
+            output_file_name = f"{task_directory}/partition{i}/out-{self.task_file}" 
             while not os.path.exists(output_file_name):
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
             callback(output_file_name)
 
@@ -119,19 +123,23 @@ class Coordinator:
         """
         read the intermediate map output, hash it and split then write to the new partitions
         """
-        filename = os.path.basename(filepath)
+        filename = os.path.basename(filepath).lstrip('int-')
         with open(filepath, 'r') as fd:
             for line in fd.readlines():
-                key, *val = line.split()
-                target_partition = sha1(key)%self.num_partitions
-                target_file = os.path.join(f"filesystem/{self.cur_task}/{target_partition}/redinput-{filename}")
+                key, val = line.split(',')
+                key = key.strip()
+                val = val.strip()
+                hex_hash = sha1(key.encode('utf-8')).hexdigest()
+                int_hash = int(hex_hash, 16)  # convert hexadecimal to integer
+                target_partition = int_hash%self.num_partitions
+                target_file = os.path.join(f"filesystem/{self.cur_task}/partition{target_partition}/redinput-{filename}")
                 if not os.path.exists(target_file):
-                    open(target_file, "w").close() #create file
-                os.system(f"echo {key, val} >> {target_file}") # append to the file
+                    open(target_file, "w+").close() #create file
+                os.system(f"echo '{key}, {val}' >> {target_file}") # append to the file
     
     def collect(self, output_file):
         with open(output_file, "r") as fd:
-            output = output_file.read()
+            output = fd.read()
         
         with open(f"filesystem/{self.cur_task}/out.txt", "a") as fd:
             print(output, file=fd)
@@ -142,9 +150,10 @@ class Coordinator:
         self.cur_task = "IDLE"
 
 
-    async def start_task(self):
+    
+    def start_task(self):
         """
-        Wrapper around await_map_results, await_reduce_results and await_task to make it easier to run them asynchronously.
+        Wrapper around await_map_results, await_reduce_results and await_task to make it easier to run them.
         """
         self.start_map()
         self.await_map_results(self.shuffle)
@@ -185,6 +194,10 @@ class Coordinator:
             self.mapper = data["mapper_file"]
             self.reducer = data["reducer_file"]
             self.cur_task = data["task_name"]
+
+            if os.path.exists(f"filesystem/{self.cur_task}"):
+                print(f"{get_current_time()} Task name already exists choose a different name")
+                return "ERR"
 
             self.probe_workers()
             partitions_dir = self.partition_input_file(data["input_file"])
