@@ -1,7 +1,7 @@
 import requests
 
 body = {
-    "task_name": "sample_task",
+    "task_name": "task2",
     "mapper_file":"mapper.py",
     "reducer_file":"reducer.py",
     "input_file":"sample.txt"
