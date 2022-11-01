@@ -6,6 +6,8 @@ from utils.common import get_current_time
 import os
 import subprocess
 import time
+import numpy as np
+
 
 class Coordinator:
 
@@ -150,7 +152,7 @@ class Coordinator:
                 return f"{id}"
             return -1
 
-        @self.app.route("/schedule", methods=["POST"]):
+        @self.app.route("/schedule", methods=["POST"])
         def shched_mapred_task():
             if self.cur_task != "IDLE":
                 return "Please wait for previous task to finish before scheduling new task"
